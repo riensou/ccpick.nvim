@@ -16,12 +16,12 @@ local defaults = {
   -- How many of the most recent assistant turns to scan
   turns = 1,
 
-  -- Highlight colors (override these in your colorscheme or setup())
+  -- Highlight groups (linked to standard Neovim groups by default)
   highlights = {
-    available = { bg = "#1e3a5f", fg = "#a8c8e8" },  -- muted blue
-    selected  = { bg = "#1a6fc4", fg = "#ffffff" },  -- bright blue
-    title     = { fg = "#a8c8e8", bold = true },
-    empty     = { fg = "#666666", italic = true },
+    available = { link = "Normal" },
+    selected  = { link = "PmenuSel" },
+    title     = { link = "FloatTitle" },
+    empty     = { link = "Comment" },
   },
 }
 

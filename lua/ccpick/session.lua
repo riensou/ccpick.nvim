@@ -35,15 +35,25 @@ local function latest_jsonl(dir)
   return newest
 end
 
--- Primary strategy: match by current working directory
+-- Primary strategy: match by cwd or any parent directory
 local function find_by_cwd()
-  local cwd = vim.fn.getcwd()
-  local encoded = encode_path(cwd)
-  local dir = projects_dir() .. "/" .. encoded
+  local dir = vim.fn.getcwd()
 
-  if vim.fn.isdirectory(dir) == 1 then
-    return latest_jsonl(dir)
+  -- walk up the tree until we find a matching project or hit home/root
+  local home = vim.fn.expand("~")
+  while dir ~= "" and dir ~= "/" and dir ~= home do
+    local encoded = encode_path(dir)
+    local project_dir = projects_dir() .. "/" .. encoded
+
+    if vim.fn.isdirectory(project_dir) == 1 then
+      local found = latest_jsonl(project_dir)
+      if found then return found end
+    end
+
+    -- go up one level
+    dir = vim.fn.fnamemodify(dir, ":h")
   end
+
   return nil
 end
 
