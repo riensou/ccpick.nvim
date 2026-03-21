@@ -13,14 +13,13 @@ local defaults = {
   -- Set to {"bash","sh","zsh"} to show shell commands only.
   langs = { "bash", "sh", "zsh" },
 
-  -- How many of the most recent assistant turns to scan
-  turns = 1,
+  -- (turns is no longer needed — all turns are available via h/l navigation)
 
   -- Highlight groups (linked to standard Neovim groups by default)
   highlights = {
     available = { link = "Normal" },
     selected  = { link = "PmenuSel" },
-    title     = { link = "FloatTitle" },
+    title     = { link = "Directory" },
     empty     = { link = "Comment" },
   },
 }
@@ -43,22 +42,21 @@ function M.pick()
     return
   end
 
-  local items, perr = parser.parse(path, {
+  local turns, perr = parser.parse_by_turn(path, {
     langs = config.langs,
-    turns = config.turns,
   })
 
-  if not items then
+  if not turns then
     vim.notify("[ccpick] Parse error: " .. perr, vim.log.levels.ERROR)
     return
   end
 
-  if #items == 0 then
-    vim.notify("[ccpick] No commands found in last Claude response.", vim.log.levels.INFO)
+  if #turns == 0 then
+    vim.notify("[ccpick] No commands found in session.", vim.log.levels.INFO)
     return
   end
 
-  picker.open(items)
+  picker.open(turns)
 end
 
 -- Setup function for lazy.nvim / user config
