@@ -228,27 +228,41 @@ local function create_window(lines, title, opts)
     end
   end, kopts)
 
-  -- Follow-up ask: \ca in the viewer
-  vim.keymap.set("v", "<leader>ca", function()
-    -- Get visual selection from the response
-    local start_pos = vim.fn.getpos("'<")
-    local end_pos = vim.fn.getpos("'>")
-    local sel_lines = vim.fn.getline(start_pos[2], end_pos[2])
-    if type(sel_lines) == "string" then sel_lines = { sel_lines } end
-    local selected = table.concat(sel_lines, "\n")
+  -- Check if branch is busy before allowing follow-up
+  local function check_busy()
+    if state.branch and (state.branch.status == "loading" or state.branch.status == "streaming") then
+      vim.notify("[ccpick] Waiting for response — try again after.", vim.log.levels.WARN)
+      return true
+    end
+    return false
+  end
 
-    vim.ui.input({ prompt = "Follow up: " }, function(prompt)
-      if prompt == nil then return end
-      if prompt == "" then
-        prompt = "Explain this further."
-      end
-      if state.on_follow_up then
-        state.on_follow_up(prompt, selected)
-      end
+  -- Follow-up ask: \ca in the viewer (visual mode)
+  vim.keymap.set("v", "<leader>ca", function()
+    if check_busy() then return end
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "nx", false)
+    vim.schedule(function()
+      local start_pos = vim.fn.getpos("'<")
+      local end_pos = vim.fn.getpos("'>")
+      local sel_lines = vim.fn.getline(start_pos[2], end_pos[2])
+      if type(sel_lines) == "string" then sel_lines = { sel_lines } end
+      local selected = table.concat(sel_lines, "\n")
+
+      vim.ui.input({ prompt = "Follow up: " }, function(prompt)
+        if prompt == nil then return end
+        if prompt == "" then
+          prompt = "Explain this further."
+        end
+        if state.on_follow_up then
+          state.on_follow_up(prompt, selected)
+        end
+      end)
     end)
   end, kopts)
 
+  -- Follow-up ask: \ca in the viewer (normal mode)
   vim.keymap.set("n", "<leader>ca", function()
+    if check_busy() then return end
     vim.ui.input({ prompt = "Follow up: " }, function(prompt)
       if prompt == nil then return end
       if prompt == "" then

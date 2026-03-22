@@ -127,17 +127,17 @@ function M.follow_up(branch, prompt, code)
     return false
   end
 
-  table.insert(branch.messages, { role = "user", text = prompt })
-
-  branch.status = "loading"
-  branch.response = ""
-
   -- Dual approach: if this branch was the last to use the session,
   -- just --continue (Option B). Otherwise, prepend context (Option A).
   local full_prompt = prompt
   if last_session_branch_id ~= branch.id then
     full_prompt = build_context(branch) .. prompt
   end
+
+  table.insert(branch.messages, { role = "user", text = prompt })
+
+  branch.status = "loading"
+  branch.response = ""
 
   ask.run(full_prompt, code, function(chunk)
     if branch.status == "loading" then
