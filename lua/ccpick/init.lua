@@ -1,29 +1,95 @@
-local session = require("ccpick.session")
-local parser  = require("ccpick.parser")
-local picker  = require("ccpick.picker")
-local ask     = require("ccpick.ask")
-local viewer  = require("ccpick.viewer")
+local session  = require("ccpick.session")
+local parser   = require("ccpick.parser")
+local picker   = require("ccpick.picker")
+local branches = require("ccpick.branches")
+local viewer   = require("ccpick.viewer")
+local manager  = require("ccpick.manager")
 
 local M = {}
 
+-- Track the currently viewed branch so \cv can reopen it
+local current_branch_id = nil
+
+-- Start polling a branch and update the viewer if it's open
+local function poll_branch(branch, title)
+  local started = false
+  local poll_timer = vim.uv.new_timer()
+  poll_timer:start(100, 100, vim.schedule_wrap(function()
+    -- Check if branch has response data
+    if not started and branch.response ~= "" then
+      started = true
+      if viewer.is_open() and viewer.get_branch() and viewer.get_branch().id == branch.id then
+        viewer.start_streaming(branch, title)
+      end
+    end
+
+    -- Update viewer if it's showing this branch
+    if started and viewer.is_open() and viewer.get_branch() and viewer.get_branch().id == branch.id then
+      viewer.update_branch(branch, title)
+    end
+
+    -- Stop polling when done
+    if branch.status == "done" or branch.status == "error" then
+      poll_timer:stop()
+      poll_timer:close()
+      if viewer.get_branch() and viewer.get_branch().id == branch.id then
+        viewer.done_streaming()
+      end
+    end
+  end))
+end
+
+-- Handle follow-up from inside the viewer
+local function handle_follow_up(prompt, code)
+  local branch = viewer.get_branch()
+  if not branch then return end
+
+  local title = "claude [#" .. branch.id .. "]"
+
+  -- Clear on_close so reopening doesn't trigger manager
+  viewer.set_on_close(nil)
+
+  branches.follow_up(branch, prompt, code)
+
+  -- Immediately re-render to show the new user message + loading shimmer
+  viewer.open_branch(branch, title)
+
+  poll_branch(branch, title)
+end
+
+-- Set up the follow-up callback
+viewer.set_on_follow_up(handle_follow_up)
+
+-- Show a branch's conversation in the viewer
+local function show_branch(branch)
+  if not branch then return end
+  current_branch_id = branch.id
+  local title = "claude [#" .. branch.id .. "]"
+
+  viewer.open_branch(branch, title)
+
+  viewer.set_on_close(function()
+    manager.toggle()
+  end)
+end
+
+-- Set up the manager callback
+manager.on_open_branch = show_branch
+
 -- Default config
 local defaults = {
-  -- Keymaps
-  keymap     = "<leader>cc",
-  ask_keymap = "<leader>ca",
+  keymap          = "<leader>cc",
+  ask_keymap      = "<leader>ca",
+  view_keymap     = "<leader>cv",
+  manager_keymap  = "<leader>cm",
 
-  -- Which languages to show. Empty table = show all.
-  -- Set to {"bash","sh","zsh"} to show shell commands only.
   langs = { "bash", "sh", "zsh" },
 
-  -- (turns is no longer needed — all turns are available via h/l navigation)
-
-  -- Highlight groups (linked to standard Neovim groups by default)
   highlights = {
-    available = { link = "Normal" },
-    selected  = { link = "PmenuSel" },
-    title     = { link = "Directory" },
-    empty      = { link = "Comment" },
+    available   = { link = "Normal" },
+    selected    = { link = "PmenuSel" },
+    title       = { link = "Directory" },
+    empty       = { link = "Comment" },
     inline_code = { link = "Function" },
   },
 }
@@ -64,61 +130,101 @@ function M.pick()
   picker.open(turns)
 end
 
--- Ask Claude about selected code
-function M.ask()
-  -- Get visual selection
-  local start_pos = vim.fn.getpos("'<")
-  local end_pos = vim.fn.getpos("'>")
-  local lines = vim.fn.getline(start_pos[2], end_pos[2])
-  if type(lines) == "string" then lines = { lines } end
-  local code = table.concat(lines, "\n")
+-- Shared ask logic
+local function do_ask(mode)
+  local code, line_range
+  if mode == "visual" then
+    local start_pos = vim.fn.getpos("'<")
+    local end_pos = vim.fn.getpos("'>")
+    local lines = vim.fn.getline(start_pos[2], end_pos[2])
+    if type(lines) == "string" then lines = { lines } end
+    code = table.concat(lines, "\n")
+    line_range = { start_pos[2], end_pos[2] }
+  else
+    local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    code = table.concat(lines, "\n")
+  end
 
-  -- Prompt for input
+  local file = vim.fn.expand("%:t")
+
   vim.ui.input({ prompt = "Ask Claude: " }, function(prompt)
-    if prompt == nil then return end -- user pressed Esc/cancelled
+    if prompt == nil then return end
     if prompt == "" then
       prompt = "Explain what this code does, how it works, and why it's written this way."
     end
 
-    viewer.show_loading("claude")
+    local branch = branches.create(prompt, code, file, line_range)
+    current_branch_id = branch.id
+    local title = "claude [#" .. branch.id .. "]"
 
-    ask.run(prompt, code, function(response, exit_code)
-      if exit_code ~= 0 then
-        viewer.close()
-        vim.notify("[ccpick] Claude exited with code " .. exit_code, vim.log.levels.ERROR)
-        return
-      end
-      if response == "" then
-        viewer.close()
-        vim.notify("[ccpick] No response from Claude.", vim.log.levels.WARN)
-        return
-      end
-      viewer.open(response, "claude")
-    end)
+    -- Run in background, don't auto-open viewer
+    poll_branch(branch, title)
   end)
 end
 
--- Setup function for lazy.nvim / user config
+-- Ask Claude (continues session)
+function M.ask(mode)
+  do_ask(mode)
+end
+
+-- Toggle the response viewer for the most recent branch
+function M.view()
+  local all = branches.list()
+  local branch = #all > 0 and all[1] or nil
+  if branch then
+    current_branch_id = branch.id
+  end
+
+  if not branch then
+    vim.notify("[ccpick] No branches to show.", vim.log.levels.INFO)
+    return
+  end
+
+  local title = "claude [#" .. branch.id .. "]"
+  viewer.toggle_branch(branch, title)
+end
+
+-- Toggle the branch manager
+function M.branches()
+  manager.toggle()
+end
+
+-- Setup
 function M.setup(opts)
   config = vim.tbl_deep_extend("force", defaults, opts or {})
 
-  -- Define highlight groups
   define_highlights()
 
-  -- Re-apply highlights when colorscheme changes
   vim.api.nvim_create_autocmd("ColorScheme", {
     callback = define_highlights,
   })
 
-  -- Register keymaps
   vim.keymap.set("n", config.keymap, M.pick, {
     desc    = "ccpick: pick command from Claude Code session",
     silent  = true,
     noremap = true,
   })
 
-  vim.keymap.set("v", config.ask_keymap, ":<C-u>lua require('ccpick').ask()<CR>", {
+  vim.keymap.set("v", config.ask_keymap, ":<C-u>lua require('ccpick').ask('visual')<CR>", {
     desc    = "ccpick: ask Claude about selected code",
+    silent  = true,
+    noremap = true,
+  })
+
+  vim.keymap.set("n", config.ask_keymap, function() M.ask("normal") end, {
+    desc    = "ccpick: ask Claude about current file",
+    silent  = true,
+    noremap = true,
+  })
+
+  vim.keymap.set("n", config.view_keymap, M.view, {
+    desc    = "ccpick: toggle Claude response viewer",
+    silent  = true,
+    noremap = true,
+  })
+
+  vim.keymap.set("n", config.manager_keymap, M.branches, {
+    desc    = "ccpick: toggle claude manager",
     silent  = true,
     noremap = true,
   })

@@ -77,11 +77,43 @@ local function apply_previews()
   -- Usable width for the main buffer line (accounts for line numbers + prefix)
   local content_width = math.max(20, win_width - 6) -- line numbers ~4 + "  " prefix
 
+  -- Get cursor position to determine which item is selected
+  local cursor_row = nil
+  if is_open() then
+    cursor_row = vim.api.nvim_win_get_cursor(state.winnr)[1]
+  end
+
   for i, item in ipairs(items) do
     if state.toggled[i] then
       local virt_lines = {}
       local prefix = "    "
       local max_w = math.max(20, win_width - #prefix - 4)
+      local hl = (i == cursor_row) and HL_SELECTED or "Normal"
+
+      -- Helper to pad line to full window width
+      local function pad_line(text)
+        local pad = win_width - #text
+        if pad > 0 then return text .. string.rep(" ", pad) end
+        return text
+      end
+
+      -- Word-wrap helper: find last space before limit
+      local function word_wrap(text)
+        local result = {}
+        while #text > max_w do
+          local wrap_at = max_w
+          local space = text:sub(1, max_w):find("%s[^%s]*$")
+          if space and space > 5 then
+            wrap_at = space
+          end
+          table.insert(result, text:sub(1, wrap_at))
+          text = text:sub(wrap_at + 1)
+        end
+        if #text > 0 then
+          table.insert(result, text)
+        end
+        return result
+      end
 
       if item.cmd:find("\n") then
         -- Multi-line command: show lines after the first
@@ -90,23 +122,16 @@ local function apply_previews()
           if first then
             first = false
           else
-            -- Wrap long continuation lines
-            while #sub_line > max_w do
-              table.insert(virt_lines, { { prefix .. sub_line:sub(1, max_w), "Normal" } })
-              sub_line = sub_line:sub(max_w + 1)
+            for _, wl in ipairs(word_wrap(sub_line)) do
+              table.insert(virt_lines, { { pad_line(prefix .. wl), hl } })
             end
-            table.insert(virt_lines, { { prefix .. sub_line, "Normal" } })
           end
         end
       else
         -- Long single-line: show the part that was cut off
         local hidden = item.cmd:sub(content_width + 1)
-        while #hidden > max_w do
-          table.insert(virt_lines, { { prefix .. hidden:sub(1, max_w), "Normal" } })
-          hidden = hidden:sub(max_w + 1)
-        end
-        if #hidden > 0 then
-          table.insert(virt_lines, { { prefix .. hidden, "Normal" } })
+        for _, wl in ipairs(word_wrap(hidden)) do
+          table.insert(virt_lines, { { pad_line(prefix .. wl), hl } })
         end
       end
 
@@ -368,6 +393,17 @@ function M.open(turns)
 
   set_keymaps(bufnr)
   render()
+
+  -- Update preview highlights when cursor moves
+  vim.api.nvim_create_autocmd("CursorMoved", {
+    buffer   = bufnr,
+    callback = function()
+      -- Only re-apply if any items are toggled
+      for _, v in pairs(state.toggled) do
+        if v then apply_previews(); return end
+      end
+    end,
+  })
 
   vim.api.nvim_create_autocmd("WinLeave", {
     buffer   = bufnr,
