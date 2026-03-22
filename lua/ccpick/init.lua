@@ -49,7 +49,8 @@ local function handle_follow_up(prompt, code)
   -- Clear on_close so reopening doesn't trigger manager
   viewer.set_on_close(nil)
 
-  branches.follow_up(branch, prompt, code)
+  local ok = branches.follow_up(branch, prompt, code)
+  if not ok then return end
 
   -- Immediately re-render to show the new user message + loading shimmer
   viewer.open_branch(branch, title)

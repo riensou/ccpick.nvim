@@ -115,8 +115,18 @@ local function build_context(branch)
   return table.concat(parts, "\n")
 end
 
+-- Check if a branch is busy (loading or streaming)
+function M.is_busy(branch)
+  return branch.status == "loading" or branch.status == "streaming"
+end
+
 -- Send a follow-up message on an existing branch
 function M.follow_up(branch, prompt, code)
+  if M.is_busy(branch) then
+    vim.notify("[ccpick] Waiting for response — try again after.", vim.log.levels.WARN)
+    return false
+  end
+
   table.insert(branch.messages, { role = "user", text = prompt })
 
   branch.status = "loading"
@@ -145,6 +155,8 @@ function M.follow_up(branch, prompt, code)
       branch.status = "done"
     end
   end, {})
+
+  return true
 end
 
 -- Get count of active (loading/streaming) branches
