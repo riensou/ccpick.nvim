@@ -41,14 +41,15 @@ local function current_items()
   return turn and turn.items or {}
 end
 
--- Format an ISO timestamp to local time (e.g. "12:34 PM")
+-- Format an ISO timestamp (UTC) to local time (e.g. "12:34 PM")
 local function format_timestamp(ts)
   if not ts then return nil end
   local y, mo, d, h, mi, s = ts:match("(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)")
   if not y then return nil end
-  local utc = os.time({ year = y, month = mo, day = d, hour = h, min = mi, sec = s })
-  local local_time = utc + (os.time() - os.time(os.date("!*t")))
-  return os.date("%I:%M %p", local_time)
+  local now = os.time()
+  local utc_offset = os.difftime(now, os.time(os.date("!*t", now)))
+  local epoch = os.time({ year = y, month = mo, day = d, hour = h, min = mi, sec = s, isdst = false })
+  return os.date("%I:%M %p", epoch + utc_offset)
 end
 
 -- Build display lines — always one buffer line per item (collapsed view)
