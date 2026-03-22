@@ -248,7 +248,7 @@ local function create_window(lines, title, opts)
       if type(sel_lines) == "string" then sel_lines = { sel_lines } end
       local selected = table.concat(sel_lines, "\n")
 
-      vim.ui.input({ prompt = "Follow up: " }, function(prompt)
+      vim.ui.input({ prompt = "[ccpick] Follow up: " }, function(prompt)
         if prompt == nil then return end
         if prompt == "" then
           prompt = "Explain this further."

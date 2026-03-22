@@ -148,7 +148,7 @@ local function do_ask(mode)
 
   local file = vim.fn.expand("%:t")
 
-  vim.ui.input({ prompt = "Ask Claude: " }, function(prompt)
+  vim.ui.input({ prompt = "[ccpick] Ask: " }, function(prompt)
     if prompt == nil then return end
     if prompt == "" then
       prompt = "Explain what this code does, how it works, and why it's written this way."
